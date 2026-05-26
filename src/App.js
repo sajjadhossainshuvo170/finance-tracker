@@ -8,27 +8,33 @@ const SHORT   = MONTHS.map(m => m.slice(0,3));
 const CATS    = ["Essential","Food","Transport","Health","Entertainment","Education","Other"];
 const CAT_CLR = { Essential:"#06b6d4", Food:"#34d399", Transport:"#fbbf24", Health:"#f87171", Entertainment:"#c4b5fd", Education:"#818cf8", Other:"#94a3b8" };
 
+const TH_STYLE = { padding:"8px 10px", textAlign:"left", color:"#3d5166", fontSize:10, fontWeight:700,
+  letterSpacing:"0.09em", textTransform:"uppercase", borderBottom:"1px solid rgba(255,255,255,0.05)", whiteSpace:"nowrap" };
+const TD_STYLE = { padding:"8px 10px", borderBottom:"1px solid rgba(255,255,255,0.032)", verticalAlign:"middle" };
+
 /* ═══════════════════════════════════════════════
    UTILS
 ═══════════════════════════════════════════════ */
-const fmt    = n  => "৳" + Math.round(n||0).toLocaleString("en-IN");
-const pct    = (a,b) => b > 0 ? Math.min(100, Math.round((a/b)*100)) : 0;
-const uid    = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
-const clamp  = (v,lo,hi) => Math.min(hi, Math.max(lo, v));
-const mkKey  = (y,m) => `${y}-${String(m+1).padStart(2,"0")}`;
-const k2ym   = k  => { const [y,m] = k.split("-"); return [+y, +m-1]; };
-const nowKey = () => { const d = new Date(); return mkKey(d.getFullYear(), d.getMonth()); };
+const fmt   = n  => "৳" + Math.round(n||0).toLocaleString("en-IN");
+const pct   = (a,b) => b > 0 ? Math.min(100, Math.round((a/b)*100)) : 0;
+const uid   = () => Date.now().toString(36) + Math.random().toString(36).slice(2);
+const clamp = (v,lo,hi) => Math.min(hi, Math.max(lo, v));
+const mkKey = (y,m) => `${y}-${String(m+1).padStart(2,"0")}`;
+const k2ym  = k  => { const [y,m] = k.split("-"); return [+y, +m-1]; };
+const nowKey= () => { const d = new Date(); return mkKey(d.getFullYear(), d.getMonth()); };
 
 /* ═══════════════════════════════════════════════
    STORAGE
 ═══════════════════════════════════════════════ */
-const LS_KEY = "sft_v4";
+const LS_KEY = "sft_v5";
 function loadStore() {
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) { const d = JSON.parse(raw); if (d?.months) return d; }
   } catch {}
-  return mkStore({ [mkKey(2025,5)]: seedJune() });
+  // FIX: seed with current month, not hardcoded June 2025
+  const ck = nowKey();
+  return mkStore({ [ck]: seedCurrentMonth() });
 }
 function mkStore(months) {
   return { months, templates: defaultTemplates(), lastAutoInit: null };
@@ -55,31 +61,21 @@ function defaultTemplates() {
   };
 }
 
-function seedJune() {
+// FIX: seed with current month dynamically
+function seedCurrentMonth() {
   return {
     income: [
-      { id:uid(), source:"May Carryover",  budgeted:4400,  actual:4400  },
-      { id:uid(), source:"Main Salary",    budgeted:60000, actual:60000 },
-      { id:uid(), source:"Sublet Rent",    budgeted:7500,  actual:7500  },
-      { id:uid(), source:"Extra Income",   budgeted:20000, actual:20000 },
+      { id:uid(), source:"Main Salary",  budgeted:60000, actual:0 },
+      { id:uid(), source:"Extra Income", budgeted:0,     actual:0 },
     ],
     expenses: [
-      { id:uid(), name:"Eid Meat & Groceries",                budgeted:3600,  actual:3600,  paid:false, category:"Food"      },
-      { id:uid(), name:"May Final Week Expenses",             budgeted:4000,  actual:4000,  paid:false, category:"Other"     },
-      { id:uid(), name:"Loan/Installment (Arrears & Current)",budgeted:30000, actual:30000, paid:false, category:"Essential" },
-      { id:uid(), name:"House Rent & Bills",                  budgeted:16100, actual:16100, paid:false, category:"Essential" },
-      { id:uid(), name:"School Fees",                         budgeted:1500,  actual:1500,  paid:false, category:"Education" },
-      { id:uid(), name:"Shop Debt (1st Installment)",         budgeted:7000,  actual:7000,  paid:false, category:"Essential" },
-      { id:uid(), name:"Monthly Cash Groceries",              budgeted:15000, actual:15000, paid:false, category:"Food"      },
-      { id:uid(), name:"Fresh Vegetables",                    budgeted:2500,  actual:2500,  paid:false, category:"Food"      },
-      { id:uid(), name:"Ammu Milad",                          budgeted:5000,  actual:5000,  paid:false, category:"Other"     },
-      { id:uid(), name:"June Personal/Travel",                budgeted:4000,  actual:4000,  paid:false, category:"Transport" },
+      { id:uid(), name:"House Rent",      budgeted:10000, actual:0, paid:false, category:"Essential", notes:"" },
+      { id:uid(), name:"Internet Bill",   budgeted:1000,  actual:0, paid:false, category:"Essential", notes:"" },
+      { id:uid(), name:"Electricity",     budgeted:2000,  actual:0, paid:false, category:"Essential", notes:"" },
+      { id:uid(), name:"Food Budget",     budgeted:15000, actual:0, paid:false, category:"Food",      notes:"" },
+      { id:uid(), name:"Transportation",  budgeted:3000,  actual:0, paid:false, category:"Transport", notes:"" },
     ],
-    debts: [
-      { id:uid(), name:"Shop Debt",        totalDebt:20000,  paid:7000,  dueDate:"2025-09-30", completed:false },
-      { id:uid(), name:"Loan Installment", totalDebt:100000, paid:30000, dueDate:"2026-12-31", completed:false },
-      { id:uid(), name:"Family Loan",      totalDebt:50000,  paid:0,     dueDate:"",           completed:false },
-    ],
+    debts:   [],
     savings: 0,
   };
 }
@@ -91,13 +87,20 @@ function createNewMonth(templates, prevData) {
     .map(d => {
       const rem = Math.max(0, (d.totalDebt||0) - (d.paid||0));
       return rem > 0
-        ? { id:uid(), name:d.name, totalDebt:rem, paid:0, dueDate:d.dueDate, completed:false, carriedOver:true }
+        ? { id:uid(), name:d.name, totalDebt:rem, paid:0, dueDate:d.dueDate, completed:false, carriedOver:true, notes:"" }
         : null;
     })
     .filter(Boolean);
+
+  // FIX: carry previous month's positive savings as carryover income
+  const prevSav = prevData ? calcMonth(prevData).sav : 0;
+  const carryoverIncome = prevSav > 0
+    ? [{ id:uid(), source:"Carryover (prev month)", budgeted:prevSav, actual:prevSav }]
+    : [];
+
   return {
-    income:   tmpl.income.map(t  => ({ id:uid(), source:t.source, budgeted:t.budgeted, actual:0 })),
-    expenses: tmpl.expenses.map(t => ({ id:uid(), name:t.name, budgeted:t.budgeted, actual:0, paid:false, category:t.category||"Essential" })),
+    income:   [...carryoverIncome, ...tmpl.income.map(t => ({ id:uid(), source:t.source, budgeted:t.budgeted, actual:0 }))],
+    expenses: tmpl.expenses.map(t => ({ id:uid(), name:t.name, budgeted:t.budgeted, actual:0, paid:false, category:t.category||"Essential", notes:"" })),
     debts:    prevDebts,
     savings:  0,
   };
@@ -107,10 +110,10 @@ function createNewMonth(templates, prevData) {
    CALCULATIONS
 ═══════════════════════════════════════════════ */
 function calcMonth(md) {
-  const inc  = (md.income||[]).reduce((s,i) => s+(i.actual||0), 0);
-  const exp  = (md.expenses||[]).reduce((s,e) => s+(e.actual||0), 0);
-  const dpaid= (md.debts||[]).reduce((s,d) => s+(d.paid||0), 0);
-  const sav  = inc - exp - dpaid;
+  const inc   = (md.income||[]).reduce((s,i) => s+(i.actual||0), 0);
+  const exp   = (md.expenses||[]).reduce((s,e) => s+(e.actual||0), 0);
+  const dpaid = (md.debts||[]).reduce((s,d) => s+(d.paid||0), 0);
+  const sav   = inc - exp - dpaid;
   return { inc, exp, dpaid, sav };
 }
 function cumSavings(months) {
@@ -142,8 +145,8 @@ function exportCSV(monthKey, md) {
   let csv = `Sajjad Finance Tracker - ${MONTHS[m]} ${y}\n\n`;
   csv += "INCOME\nSource,Budgeted,Actual,Variance\n";
   (md.income||[]).forEach(r => { csv += `"${r.source}",${r.budgeted||0},${r.actual||0},${(r.actual||0)-(r.budgeted||0)}\n`; });
-  csv += `\nEXPENSES\nName,Category,Budgeted,Actual,Paid\n`;
-  (md.expenses||[]).forEach(r => { csv += `"${r.name}","${r.category||""}",${r.budgeted||0},${r.actual||0},${r.paid?"Yes":"No"}\n`; });
+  csv += `\nEXPENSES\nName,Category,Budgeted,Actual,Paid,Notes\n`;
+  (md.expenses||[]).forEach(r => { csv += `"${r.name}","${r.category||""}",${r.budgeted||0},${r.actual||0},${r.paid?"Yes":"No"},"${r.notes||""}"\n`; });
   csv += `\nDEBTS\nName,Total,Paid,Remaining,Due,Status\n`;
   (md.debts||[]).forEach(r => { csv += `"${r.name}",${r.totalDebt||0},${r.paid||0},${Math.max(0,(r.totalDebt||0)-(r.paid||0))},"${r.dueDate||""}","${r.completed?"Done":"Active"}"\n`; });
   const { inc, exp, dpaid, sav } = calcMonth(md);
@@ -163,46 +166,82 @@ function exportBackup(store) {
 }
 
 /* ═══════════════════════════════════════════════
-   BASE UI
+   BASE UI COMPONENTS (outside App = no remounts)
 ═══════════════════════════════════════════════ */
 function NumInput({ value, onChange, width=108 }) {
   const [f,sf] = useState(false);
   return (
-    <input type="number" value={value} onChange={e=>onChange(+e.target.value||0)}
+    <input type="number" value={value} onChange={e => onChange(+e.target.value||0)}
       onFocus={()=>sf(true)} onBlur={()=>sf(false)} className="hs"
-      style={{ background:"rgba(255,255,255,0.05)", border:`1px solid ${f?"#06b6d4":"rgba(255,255,255,0.1)"}`,
-        borderRadius:8, padding:"6px 8px", color:"#dde4ee", fontSize:13, width, outline:"none",
-        fontFamily:"inherit", boxSizing:"border-box", transition:"border-color .15s" }} />
+      style={{ background:"rgba(255,255,255,0.05)",
+        border:`1px solid ${f?"#06b6d4":"rgba(255,255,255,0.1)"}`,
+        borderRadius:8, padding:"6px 8px", color:"#dde4ee", fontSize:13,
+        width, outline:"none", fontFamily:"inherit", boxSizing:"border-box",
+        transition:"border-color .15s" }} />
   );
 }
+
 function TxtInput({ value, onChange, placeholder="Name..." }) {
   const [f,sf] = useState(false);
   return (
-    <input type="text" value={value} onChange={e=>onChange(e.target.value)}
+    <input type="text" value={value} onChange={e => onChange(e.target.value)}
       onFocus={()=>sf(true)} onBlur={()=>sf(false)} placeholder={placeholder}
-      style={{ background:f?"rgba(255,255,255,0.05)":"transparent",
+      style={{ background: f?"rgba(255,255,255,0.05)":"transparent",
         border:`1px solid ${f?"rgba(6,182,212,0.4)":"transparent"}`,
-        borderRadius:7, padding:"6px 8px", color:"#c8d3e0", fontSize:13, outline:"none",
-        width:"100%", fontFamily:"inherit", boxSizing:"border-box", transition:"all .15s" }} />
+        borderRadius:7, padding:"6px 8px", color:"#c8d3e0", fontSize:13,
+        outline:"none", width:"100%", fontFamily:"inherit",
+        boxSizing:"border-box", transition:"all .15s" }} />
   );
 }
+
+// FIX: NEW — notes textarea input
+function NotesInput({ value, onChange }) {
+  const [f,sf] = useState(false);
+  const [open,so] = useState(false);
+  if (!open) return (
+    <button onClick={()=>so(true)}
+      style={{ background:"none", border:"none", color: value ? "#67e8f9" : "#2a3a4a",
+        cursor:"pointer", fontSize:11, padding:"2px 6px", borderRadius:5,
+        fontFamily:"inherit", transition:"color .15s" }}
+      title={value || "Add note"}>
+      {value ? "📝" : "＋note"}
+    </button>
+  );
+  return (
+    <textarea value={value||""} onChange={e=>onChange(e.target.value)}
+      onFocus={()=>sf(true)} onBlur={()=>sf(false)}
+      placeholder="Notes..."
+      rows={2}
+      style={{ background:"rgba(255,255,255,0.05)",
+        border:`1px solid ${f?"rgba(6,182,212,0.4)":"rgba(255,255,255,0.1)"}`,
+        borderRadius:7, padding:"5px 8px", color:"#c8d3e0", fontSize:11,
+        outline:"none", width:"100%", fontFamily:"inherit", resize:"vertical",
+        boxSizing:"border-box", transition:"all .15s" }} />
+  );
+}
+
 function DateInput({ value, onChange }) {
   return (
-    <input type="date" value={value} onChange={e=>onChange(e.target.value)}
-      style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)",
-        borderRadius:8, padding:"6px 8px", color:"#8899aa", fontSize:12, width:"100%",
-        outline:"none", colorScheme:"dark", fontFamily:"inherit", boxSizing:"border-box" }} />
+    <input type="date" value={value} onChange={e => onChange(e.target.value)}
+      style={{ background:"rgba(255,255,255,0.05)",
+        border:"1px solid rgba(255,255,255,0.1)",
+        borderRadius:8, padding:"6px 8px", color:"#8899aa", fontSize:12,
+        width:"100%", outline:"none", colorScheme:"dark",
+        fontFamily:"inherit", boxSizing:"border-box" }} />
   );
 }
+
 function CatSelect({ value, onChange }) {
   return (
-    <select value={value||"Essential"} onChange={e=>onChange(e.target.value)}
-      style={{ background:"transparent", border:"none", color:CAT_CLR[value]||"#94a3b8",
-        fontSize:11, fontWeight:700, cursor:"pointer", fontFamily:"inherit", outline:"none" }}>
+    <select value={value||"Essential"} onChange={e => onChange(e.target.value)}
+      style={{ background:"transparent", border:"none",
+        color:CAT_CLR[value]||"#94a3b8", fontSize:11, fontWeight:700,
+        cursor:"pointer", fontFamily:"inherit", outline:"none" }}>
       {CATS.map(c => <option key={c} value={c} style={{background:"#0d1117",color:"#c8d3e0"}}>{c}</option>)}
     </select>
   );
 }
+
 function Btn({ onClick, children, color="#06b6d4", variant="outline", size="md", disabled=false, title }) {
   const [h,sh] = useState(false);
   const pad = size==="sm"?"4px 10px":size==="lg"?"10px 22px":"7px 14px";
@@ -215,13 +254,15 @@ function Btn({ onClick, children, color="#06b6d4", variant="outline", size="md",
   return (
     <button onClick={onClick} disabled={disabled} title={title}
       onMouseEnter={()=>sh(true)} onMouseLeave={()=>sh(false)}
-      style={{ display:"inline-flex", alignItems:"center", gap:5, padding:pad, borderRadius:8,
-        fontSize:fs, fontWeight:700, cursor:disabled?"not-allowed":"pointer", fontFamily:"inherit",
+      style={{ display:"inline-flex", alignItems:"center", gap:5, padding:pad,
+        borderRadius:8, fontSize:fs, fontWeight:700,
+        cursor:disabled?"not-allowed":"pointer", fontFamily:"inherit",
         opacity:disabled?.5:1, transition:"all .18s", whiteSpace:"nowrap", ...s }}>
       {children}
     </button>
   );
 }
+
 function AddBtn({ onClick, label, color="#06b6d4" }) {
   const [h,sh] = useState(false);
   return (
@@ -234,6 +275,7 @@ function AddBtn({ onClick, label, color="#06b6d4" }) {
     </button>
   );
 }
+
 function DelBtn({ onClick }) {
   const [h,sh] = useState(false);
   return (
@@ -241,9 +283,11 @@ function DelBtn({ onClick }) {
       style={{ width:28, height:28, borderRadius:7, cursor:"pointer", flexShrink:0,
         border:`1px solid ${h?"rgba(239,68,68,0.5)":"rgba(239,68,68,0.18)"}`,
         background:h?"rgba(239,68,68,0.18)":"rgba(239,68,68,0.06)", color:"#f87171",
-        display:"flex", alignItems:"center", justifyContent:"center", fontSize:13, transition:"all .18s" }}>✕</button>
+        display:"flex", alignItems:"center", justifyContent:"center",
+        fontSize:13, transition:"all .18s" }}>✕</button>
   );
 }
+
 function Badge({ bg, fg, children }) {
   return (
     <span style={{ display:"inline-block", padding:"2px 8px", borderRadius:99,
@@ -252,14 +296,37 @@ function Badge({ bg, fg, children }) {
     </span>
   );
 }
+
+function Card({ children, style={}, className="" }) {
+  return (
+    <div className={className}
+      style={{ background:"rgba(255,255,255,0.027)",
+        border:"1px solid rgba(255,255,255,0.065)",
+        borderRadius:16, padding:"18px 16px", marginBottom:16, ...style }}>
+      {children}
+    </div>
+  );
+}
+
+// FIX: rows now start visible=true immediately to prevent flash
 function FadeRow({ children, visible }) {
-  const [mount,sm] = useState(visible);
-  const [show,ss]  = useState(false);
+  const [mounted, setMounted] = useState(true);
+  const [show, setShow] = useState(true);
+
   useEffect(() => {
-    if (visible) { sm(true); requestAnimationFrame(() => requestAnimationFrame(() => ss(true))); }
-    else { ss(false); const t = setTimeout(() => sm(false), 280); return () => clearTimeout(t); }
+    if (visible) {
+      setMounted(true);
+      // Small delay so newly added rows animate in
+      const t = setTimeout(() => setShow(true), 10);
+      return () => clearTimeout(t);
+    } else {
+      setShow(false);
+      const t = setTimeout(() => setMounted(false), 280);
+      return () => clearTimeout(t);
+    }
   }, [visible]);
-  if (!mount) return null;
+
+  if (!mounted) return null;
   return (
     <tr style={{ opacity:show?1:0, transform:show?"none":"translateY(-6px)", transition:"opacity .28s,transform .28s" }}>
       {children}
@@ -267,21 +334,59 @@ function FadeRow({ children, visible }) {
   );
 }
 
+function ProgBar({ value, total, color="#818cf8", height=6 }) {
+  const p = pct(value, total);
+  return (
+    <div style={{ height, background:"rgba(255,255,255,0.055)", borderRadius:99, overflow:"hidden" }}>
+      <div style={{ height:"100%", borderRadius:99, width:`${p}%`,
+        background:`linear-gradient(90deg,${color}88,${color})`,
+        transition:"width .6s cubic-bezier(.4,0,.2,1)" }}/>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   SEARCH / FILTER BAR
+   FIX: NEW — search + category filter for expenses
+═══════════════════════════════════════════════ */
+function SearchBar({ value, onChange, placeholder }) {
+  const [f,sf] = useState(false);
+  return (
+    <div style={{ position:"relative", flex:"1 1 180px", minWidth:0 }}>
+      <span style={{ position:"absolute", left:9, top:"50%", transform:"translateY(-50%)",
+        color:"#3d5166", fontSize:13, pointerEvents:"none" }}>🔍</span>
+      <input type="text" value={value} onChange={e=>onChange(e.target.value)}
+        onFocus={()=>sf(true)} onBlur={()=>sf(false)} placeholder={placeholder||"Search..."}
+        style={{ width:"100%", background:"rgba(255,255,255,0.04)",
+          border:`1px solid ${f?"rgba(6,182,212,0.35)":"rgba(255,255,255,0.07)"}`,
+          borderRadius:9, padding:"6px 8px 6px 30px", color:"#c8d3e0", fontSize:12,
+          outline:"none", fontFamily:"inherit", boxSizing:"border-box", transition:"border-color .15s" }}/>
+      {value && (
+        <button onClick={()=>onChange("")}
+          style={{ position:"absolute", right:8, top:"50%", transform:"translateY(-50%)",
+            background:"none", border:"none", color:"#3d5166", cursor:"pointer", fontSize:14 }}>×</button>
+      )}
+    </div>
+  );
+}
+
 /* ═══════════════════════════════════════════════
    CONFIRM DIALOG
 ═══════════════════════════════════════════════ */
-function Confirm({ title, detail, confirmLabel="Delete", onOk, onCancel, danger=true }) {
+function Confirm({ title, detail, confirmLabel="Delete", onOk, onCancel }) {
   return (
     <div style={{ position:"fixed", inset:0, zIndex:2000, background:"rgba(0,0,0,0.85)",
-      display:"flex", alignItems:"center", justifyContent:"center", padding:20 }} onClick={onCancel}>
+      display:"flex", alignItems:"center", justifyContent:"center", padding:20 }}
+      onClick={onCancel}>
       <div style={{ background:"#0d1117", border:"1px solid rgba(255,255,255,0.12)",
         borderRadius:16, padding:"28px 24px", maxWidth:420, width:"100%",
-        boxShadow:"0 24px 60px rgba(0,0,0,0.8)" }} onClick={e=>e.stopPropagation()}>
+        boxShadow:"0 24px 60px rgba(0,0,0,0.8)" }}
+        onClick={e => e.stopPropagation()}>
         <div style={{ fontSize:16, fontWeight:800, color:"#eef2f8", marginBottom:8 }}>{title}</div>
         {detail && <div style={{ fontSize:13, color:"#3d5166", marginBottom:20, lineHeight:1.6 }}>{detail}</div>}
         <div style={{ display:"flex", gap:10, justifyContent:"flex-end" }}>
           <Btn onClick={onCancel} color="#67e8f9">Cancel</Btn>
-          <Btn onClick={onOk} variant={danger?"danger":"solid"} color={danger?"#f87171":"#06b6d4"}>{confirmLabel}</Btn>
+          <Btn onClick={onOk} variant="danger" color="#f87171">{confirmLabel}</Btn>
         </div>
       </div>
     </div>
@@ -302,7 +407,8 @@ function AlertBanner({ alerts }) {
     <div style={{ display:"flex", flexDirection:"column", gap:6, marginBottom:14 }}>
       {live.map((a,i) => (
         <div key={i} style={{ display:"flex", alignItems:"center", justifyContent:"space-between", gap:10,
-          padding:"9px 14px", borderRadius:10, border:`1px solid ${clr[a.type]||clr.info}`,
+          padding:"9px 14px", borderRadius:10,
+          border:`1px solid ${clr[a.type]||clr.info}`,
           background:bg[a.type]||bg.info }}>
           <span style={{ fontSize:12, color:tc[a.type]||tc.info }}>{a.icon} {a.msg}</span>
           <button onClick={()=>sd(p=>new Set([...p,i]))}
@@ -345,21 +451,7 @@ function MCard({ label, value, sub, color="#94a3b8", isHero, danger }) {
 }
 
 /* ═══════════════════════════════════════════════
-   PROGRESS BAR
-═══════════════════════════════════════════════ */
-function ProgBar({ value, total, color="#818cf8", height=6 }) {
-  const p = pct(value, total);
-  return (
-    <div style={{ height, background:"rgba(255,255,255,0.055)", borderRadius:99, overflow:"hidden" }}>
-      <div style={{ height:"100%", borderRadius:99, width:`${p}%`,
-        background:`linear-gradient(90deg,${color}88,${color})`,
-        transition:"width .6s cubic-bezier(.4,0,.2,1)" }}/>
-    </div>
-  );
-}
-
-/* ═══════════════════════════════════════════════
-   MINI DEBT CARD
+   DEBT MINI CARD
 ═══════════════════════════════════════════════ */
 function DebtCard({ row, visible }) {
   const rem  = Math.max(0,(row.totalDebt||0)-(row.paid||0));
@@ -406,8 +498,12 @@ function DebtCard({ row, visible }) {
 function MonthNav({ year, month, onChange, allKeys }) {
   const [open,so] = useState(false);
   const key = mkKey(year,month);
-  const go  = dir => { let m=month+dir,y=year; if(m<0){m=11;y--;} if(m>11){m=0;y++;} onChange(y,m); };
-  const bs  = { borderRadius:8, border:"1px solid rgba(6,182,212,0.3)", background:"rgba(6,182,212,0.08)", color:"#67e8f9", cursor:"pointer", fontFamily:"inherit", outline:"none" };
+  const go  = useCallback(dir => {
+    let m=month+dir, y=year;
+    if(m<0){m=11;y--;} if(m>11){m=0;y++;}
+    onChange(y,m);
+  }, [month, year, onChange]);
+  const bs = { borderRadius:8, border:"1px solid rgba(6,182,212,0.3)", background:"rgba(6,182,212,0.08)", color:"#67e8f9", cursor:"pointer", fontFamily:"inherit", outline:"none" };
   return (
     <div style={{ display:"flex", alignItems:"center", gap:6, position:"relative" }}>
       <button onClick={()=>go(-1)} style={{...bs,width:32,height:32,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
@@ -426,7 +522,7 @@ function MonthNav({ year, month, onChange, allKeys }) {
               <div key={k} onClick={()=>{onChange(ky,km);so(false);}}
                 style={{ padding:"7px 12px", borderRadius:8, cursor:"pointer", fontSize:13,
                   fontWeight:isA?700:400, color:isA?"#67e8f9":"#c8d3e0",
-                  background:isA?"rgba(6,182,212,0.12)":"transparent", marginBottom:2, transition:"background .15s" }}>
+                  background:isA?"rgba(6,182,212,0.12)":"transparent", marginBottom:2 }}>
                 {MONTHS[km]} {ky}{isA?" ✓":""}
               </div>
             );
@@ -438,20 +534,24 @@ function MonthNav({ year, month, onChange, allKeys }) {
 }
 
 /* ═══════════════════════════════════════════════
-   HISTORY MANAGER MODAL
+   HISTORY MANAGER
 ═══════════════════════════════════════════════ */
 function HistoryMgr({ store, onUpdate, onClose }) {
   const [cfm,sc] = useState(null);
   const months   = store.months||{};
   const sorted   = Object.keys(months).sort().reverse();
 
-  const del = key => { const m={...months}; delete m[key]; onUpdate({...store,months:m}); };
-  const clearAll = () => onUpdate({...store,months:{}});
-  const resetSec = (key,sec) => {
-    const blank = sec==="income"?[]:sec==="expenses"?[]:sec==="debts"?[]:months[key][sec];
-    const savings = sec==="savings" ? 0 : months[key].savings;
-    onUpdate({...store,months:{...months,[key]:{...months[key],[sec]:blank,savings}}});
-  };
+  const del = useCallback(key => {
+    const m={...months}; delete m[key]; onUpdate({...store,months:m});
+  }, [months, store, onUpdate]);
+
+  const clearAll = useCallback(() => onUpdate({...store,months:{}}), [store, onUpdate]);
+
+  const resetSec = useCallback((key,sec) => {
+    const blank = (sec==="income"||sec==="expenses"||sec==="debts") ? [] : 0;
+    const patch  = sec==="savings" ? { savings:0 } : { [sec]:blank };
+    onUpdate({...store,months:{...months,[key]:{...months[key],...patch}}});
+  }, [months, store, onUpdate]);
 
   return (
     <div style={{ position:"fixed", inset:0, zIndex:1000, background:"rgba(0,0,0,0.85)",
@@ -472,7 +572,9 @@ function HistoryMgr({ store, onUpdate, onClose }) {
           </div>
         </div>
 
-        {sorted.length===0 && <div style={{ color:"#3d5166", textAlign:"center", padding:40, fontSize:13 }}>No history saved yet.</div>}
+        {sorted.length===0 && (
+          <div style={{ color:"#3d5166", textAlign:"center", padding:40, fontSize:13 }}>No history saved yet.</div>
+        )}
 
         {sorted.map(key => {
           const [y,m] = k2ym(key);
@@ -502,21 +604,25 @@ function HistoryMgr({ store, onUpdate, onClose }) {
           );
         })}
 
-        {cfm?.t==="all" && <Confirm title="Clear All History?" detail="Every month will be permanently deleted. This cannot be undone."
-          confirmLabel="Clear All" onOk={()=>{clearAll();sc(null);onClose();}} onCancel={()=>sc(null)}/>}
+        {cfm?.t==="all" && (
+          <Confirm title="Clear All History?" detail="Every month will be permanently deleted. This cannot be undone."
+            confirmLabel="Clear All" onOk={()=>{clearAll();sc(null);onClose();}} onCancel={()=>sc(null)}/>
+        )}
         {cfm?.t==="month" && (()=>{ const [y,m]=k2ym(cfm.key); return (
           <Confirm title={`Delete ${MONTHS[m]} ${y}?`} detail="All data for this month will be permanently deleted."
-            onOk={()=>{del(cfm.key);sc(null);}} onCancel={()=>sc(null)}/>
+            confirmLabel="Delete" onOk={()=>{del(cfm.key);sc(null);}} onCancel={()=>sc(null)}/>
         );})()}
-        {cfm?.t==="sec" && <Confirm title={`Reset ${cfm.sec} for this month?`} detail="This section will be cleared. Other sections stay intact."
-          onOk={()=>{resetSec(cfm.key,cfm.sec);sc(null);}} onCancel={()=>sc(null)}/>}
+        {cfm?.t==="sec" && (
+          <Confirm title={`Reset ${cfm.sec} for this month?`} detail="This section will be cleared. Other sections stay intact."
+            confirmLabel="Reset" onOk={()=>{resetSec(cfm.key,cfm.sec);sc(null);}} onCancel={()=>sc(null)}/>
+        )}
       </div>
     </div>
   );
 }
 
 /* ═══════════════════════════════════════════════
-   TEMPLATE MANAGER MODAL
+   TEMPLATE MANAGER
 ═══════════════════════════════════════════════ */
 function TemplateMgr({ templates, onSave, onClose }) {
   const [t,st] = useState(() => JSON.parse(JSON.stringify(templates)));
@@ -699,28 +805,30 @@ function DonutChart({ expenses }) {
 ═══════════════════════════════════════════════ */
 export default function App() {
   const now = new Date();
-  const [store,SS]  = useState(() => loadStore());
-  const [curY,sCY]  = useState(now.getFullYear());
-  const [curM,sCM]  = useState(now.getMonth());
-  const [vis,sv]    = useState({});
-  const [modal,sm]  = useState(null); // "history"|"templates"|"charts"
-  const fileRef     = useRef();
+  const [store,SS]       = useState(() => loadStore());
+  const [curY,sCY]       = useState(now.getFullYear());
+  const [curM,sCM]       = useState(now.getMonth());
+  // FIX: vis starts with rows already visible = true to prevent initial flash
+  const [vis,sv]         = useState({});
+  const [modal,sm]       = useState(null);
+  // FIX: separate filter state per section
+  const [expSearch,setExpSearch] = useState("");
+  const [expCat,setExpCat]       = useState("All");
+  const fileRef                  = useRef();
 
-  /* Persist */
   useEffect(() => { persist(store); }, [store]);
 
-  /* Auto-init current month on app load */
+  // FIX: proper deps — month key drives auto-init
   useEffect(() => {
     const ck = nowKey();
     SS(prev => {
       if (prev.months[ck] || prev.lastAutoInit === ck) return prev;
-      const sk    = Object.keys(prev.months).sort();
-      const prevMd= sk.length ? prev.months[sk[sk.length-1]] : null;
-      const nm    = createNewMonth(prev.templates||defaultTemplates(), prevMd);
-      return { ...prev, months: { ...prev.months, [ck]: nm }, lastAutoInit: ck };
+      const sk     = Object.keys(prev.months).sort();
+      const prevMd = sk.length ? prev.months[sk[sk.length-1]] : null;
+      const nm     = createNewMonth(prev.templates||defaultTemplates(), prevMd);
+      return { ...prev, months:{...prev.months,[ck]:nm}, lastAutoInit:ck };
     });
-  // eslint-disable-next-line
-  }, []);
+  }, []); // intentionally runs once on mount only
 
   const monthKey = mkKey(curY, curM);
   const allKeys  = Object.keys(store.months);
@@ -730,55 +838,76 @@ export default function App() {
   const debts    = md.debts   || [];
   const isCur    = nowKey() === monthKey;
 
-  /* Rebuild visible rows on month change */
+  // FIX: initialize vis with true for existing rows so they don't flash
   useEffect(() => {
     const m = {};
     [...income,...expenses,...debts].forEach(r => { m[r.id] = true; });
     sv(m);
-  // eslint-disable-next-line
-  }, [monthKey]);
+  }, [monthKey]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Updaters ── */
+  /* ── Core updaters ── */
   const updI = useCallback(fn => SS(p => {
     const c = p.months[monthKey]||{};
-    return {...p, months:{...p.months,[monthKey]:{...c, income:fn(c.income||[])}}};
+    return { ...p, months:{ ...p.months, [monthKey]:{ ...c, income:fn(c.income||[]) } } };
   }), [monthKey]);
+
   const updE = useCallback(fn => SS(p => {
     const c = p.months[monthKey]||{};
-    return {...p, months:{...p.months,[monthKey]:{...c, expenses:fn(c.expenses||[])}}};
+    return { ...p, months:{ ...p.months, [monthKey]:{ ...c, expenses:fn(c.expenses||[]) } } };
   }), [monthKey]);
+
   const updD = useCallback(fn => SS(p => {
     const c = p.months[monthKey]||{};
-    return {...p, months:{...p.months,[monthKey]:{...c, debts:fn(c.debts||[])}}};
+    return { ...p, months:{ ...p.months, [monthKey]:{ ...c, debts:fn(c.debts||[]) } } };
   }), [monthKey]);
 
-  const show = id => sv(p => ({...p,[id]:true}));
-  const hide = (id,cb) => { sv(p=>({...p,[id]:false})); setTimeout(cb,285); };
+  // FIX: new rows start with vis=false then animate in after mount
+  const show = useCallback(id => {
+    // brief delay so FadeRow mounts first, then triggers animate-in
+    setTimeout(() => sv(p => ({...p,[id]:true})), 20);
+  }, []);
+  const hide = useCallback((id,cb) => { sv(p=>({...p,[id]:false})); setTimeout(cb,285); }, []);
 
-  const addI  = () => { const id=uid(); updI(a=>[...a,{id,source:"New Source",budgeted:0,actual:0}]); show(id); };
-  const delI  = id => hide(id, ()=>updI(a=>a.filter(r=>r.id!==id)));
-  const setI  = (id,k,v) => updI(a=>a.map(r=>r.id===id?{...r,[k]:v}:r));
-  const addE  = () => { const id=uid(); updE(a=>[...a,{id,name:"New Expense",budgeted:0,actual:0,paid:false,category:"Essential"}]); show(id); };
-  const delE  = id => hide(id, ()=>updE(a=>a.filter(r=>r.id!==id)));
-  const setE  = (id,k,v) => updE(a=>a.map(r=>r.id===id?{...r,[k]:v}:r));
-  const addD  = () => { const id=uid(); updD(a=>[...a,{id,name:"New Debt",totalDebt:0,paid:0,dueDate:"",completed:false}]); show(id); };
-  const delD  = id => hide(id, ()=>updD(a=>a.filter(r=>r.id!==id)));
-  const setD  = (id,k,v) => updD(a=>a.map(r=>r.id===id?{...r,[k]:v}:r));
+  /* Income handlers */
+  const addI = useCallback(() => { const id=uid(); updI(a=>[...a,{id,source:"New Source",budgeted:0,actual:0}]); show(id); }, [updI,show]);
+  const delI = useCallback(id => hide(id,()=>updI(a=>a.filter(r=>r.id!==id))), [hide,updI]);
+  const setI = useCallback((id,k,v) => updI(a=>a.map(r=>r.id===id?{...r,[k]:v}:r)), [updI]);
 
-  /* Start next month manually */
-  function handleNextMonth() {
+  /* Expense handlers */
+  const addE = useCallback(() => {
+    const id=uid();
+    updE(a=>[...a,{id,name:"New Expense",budgeted:0,actual:0,paid:false,category:"Essential",notes:""}]);
+    show(id);
+  }, [updE,show]);
+  const delE = useCallback(id => hide(id,()=>updE(a=>a.filter(r=>r.id!==id))), [hide,updE]);
+  const setE = useCallback((id,k,v) => updE(a=>a.map(r=>r.id===id?{...r,[k]:v}:r)), [updE]);
+
+  /* Debt handlers */
+  const addD = useCallback(() => {
+    const id=uid();
+    updD(a=>[...a,{id,name:"New Debt",totalDebt:0,paid:0,dueDate:"",completed:false,notes:""}]);
+    show(id);
+  }, [updD,show]);
+  const delD = useCallback(id => hide(id,()=>updD(a=>a.filter(r=>r.id!==id))), [hide,updD]);
+  const setD = useCallback((id,k,v) => updD(a=>a.map(r=>r.id===id?{...r,[k]:v}:r)), [updD]);
+
+  const handleMonthChange = useCallback((y,m) => {
+    setExpSearch(""); setExpCat("All");
+    sCY(y); sCM(m);
+  }, []);
+
+  const handleNextMonth = useCallback(() => {
     const nm=curM===11?0:curM+1, ny=curM===11?curY+1:curY;
     const nk=mkKey(ny,nm);
     SS(prev => {
       if (prev.months[nk]) return prev;
       const created = createNewMonth(prev.templates||defaultTemplates(), prev.months[monthKey]);
-      return { ...prev, months: { ...prev.months, [nk]: created } };
+      return { ...prev, months:{ ...prev.months, [nk]:created } };
     });
     sCY(ny); sCM(nm);
-  }
+  }, [curM, curY, monthKey]);
 
-  /* Import */
-  function handleImport(e) {
+  const handleImport = useCallback(e => {
     const f = e.target.files[0]; if (!f) return;
     const r = new FileReader();
     r.onload = ev => {
@@ -786,35 +915,35 @@ export default function App() {
       catch { alert("Could not parse file."); }
     };
     r.readAsText(f); e.target.value="";
-  }
+  }, []);
 
   /* Totals */
   const { inc:totalInc, exp:totalExp, dpaid:loanPaid, sav:mthSav } = calcMonth(md);
-  const paidExp    = expenses.filter(e=>e.paid).reduce((s,e)=>s+(e.actual||0),0);
-  const liveCash   = totalInc - paidExp;
-  const netBal     = totalInc - totalExp;
-  const totalDebt  = debts.reduce((s,d)=>s+(d.totalDebt||0),0);
-  const totalPaid  = debts.reduce((s,d)=>s+(d.paid||0),0);
-  const remDebt    = totalDebt - totalPaid;
-  const debtPct    = pct(totalPaid,totalDebt);
-  const bgtInc     = income.reduce((s,i)=>s+(i.budgeted||0),0);
-  const bgtExp     = expenses.reduce((s,e)=>s+(e.budgeted||0),0);
-  const paidCnt    = expenses.filter(e=>e.paid).length;
-  const cumSav     = useMemo(()=>cumSavings(store.months),[store.months]);
-  const alerts     = useMemo(()=>buildAlerts(md),[md]);
+  const paidExp   = expenses.filter(e=>e.paid).reduce((s,e)=>s+(e.actual||0),0);
+  const liveCash  = totalInc - paidExp;
+  const netBal    = totalInc - totalExp;
+  const totalDebt = debts.reduce((s,d)=>s+(d.totalDebt||0),0);
+  const totalPaid = debts.reduce((s,d)=>s+(d.paid||0),0);
+  const remDebt   = totalDebt - totalPaid;
+  const debtPct   = pct(totalPaid,totalDebt);
+  const bgtInc    = income.reduce((s,i)=>s+(i.budgeted||0),0);
+  const bgtExp    = expenses.reduce((s,e)=>s+(e.budgeted||0),0);
+  const paidCnt   = expenses.filter(e=>e.paid).length;
+  const cumSav    = useMemo(()=>cumSavings(store.months),[store.months]);
+  const alerts    = useMemo(()=>buildAlerts(md),[md]);
 
-  const TH = { padding:"8px 10px", textAlign:"left", color:"#3d5166", fontSize:10, fontWeight:700,
-    letterSpacing:"0.09em", textTransform:"uppercase", borderBottom:"1px solid rgba(255,255,255,0.05)", whiteSpace:"nowrap" };
-  const TD = { padding:"8px 10px", borderBottom:"1px solid rgba(255,255,255,0.032)", verticalAlign:"middle" };
+  // FIX: filtered expenses (search + category)
+  const filteredExp = useMemo(() => expenses.filter(e => {
+    const matchCat  = expCat==="All" || e.category===expCat;
+    const matchText = !expSearch || e.name.toLowerCase().includes(expSearch.toLowerCase()) ||
+                      (e.notes||"").toLowerCase().includes(expSearch.toLowerCase());
+    return matchCat && matchText;
+  }), [expenses, expSearch, expCat]);
 
-  /* ── Card helper ── */
-  const Card = ({ children, style={}, className="" }) => (
-    <div className={className}
-      style={{ background:"rgba(255,255,255,0.027)", border:"1px solid rgba(255,255,255,0.065)",
-        borderRadius:16, padding:"18px 16px", marginBottom:16, ...style }}>
-      {children}
-    </div>
-  );
+  const expCats = useMemo(() => {
+    const used = [...new Set(expenses.map(e=>e.category||"Other"))];
+    return ["All", ...CATS.filter(c=>used.includes(c))];
+  }, [expenses]);
 
   return (
     <div style={{ minHeight:"100vh",
@@ -839,14 +968,14 @@ export default function App() {
           .hdr{padding:10px 12px!important;flex-wrap:wrap!important;gap:8px!important}
           .wrap{padding:0 10px!important}
           .cr{flex-direction:column!important}
-          .cr > div{width:100%!important;flex:none!important}
+          .cr>div{width:100%!important;flex:none!important}
           .ts{overflow-x:auto;-webkit-overflow-scrolling:touch}
           .hm{display:none!important}
           .ta{flex-wrap:wrap!important}
         }
       `}</style>
 
-      {/* ══ HEADER ══ */}
+      {/* HEADER */}
       <header className="hdr" style={{ borderBottom:"1px solid rgba(99,179,237,0.08)",
         background:"rgba(7,9,14,0.93)", backdropFilter:"blur(20px)",
         position:"sticky", top:0, zIndex:50, padding:"13px 24px",
@@ -863,7 +992,7 @@ export default function App() {
           </div>
         </div>
         <div style={{ display:"flex", gap:8, alignItems:"center", flexWrap:"wrap" }}>
-          <MonthNav year={curY} month={curM} onChange={(y,m)=>{sCY(y);sCM(m);}} allKeys={allKeys.length?allKeys:[monthKey]}/>
+          <MonthNav year={curY} month={curM} onChange={handleMonthChange} allKeys={allKeys.length?allKeys:[monthKey]}/>
           {isCur ? <Badge bg="rgba(34,197,94,0.15)" fg="#4ade80">● LIVE</Badge>
                  : <Badge bg="rgba(251,191,36,0.12)" fg="#fbbf24">HISTORY</Badge>}
         </div>
@@ -871,9 +1000,8 @@ export default function App() {
 
       <div className="wrap" style={{ marginTop:20 }}>
 
-        {/* ══ ACTION BAR ══ */}
-        <div className="ta" style={{ display:"flex", alignItems:"center", justifyContent:"space-between",
-          marginBottom:14, gap:8, flexWrap:"wrap" }}>
+        {/* ACTION BAR */}
+        <div className="ta" style={{ display:"flex", alignItems:"center", justifyContent:"space-between", marginBottom:14, gap:8, flexWrap:"wrap" }}>
           <div style={{ display:"flex", gap:6, flexWrap:"wrap", alignItems:"center" }}>
             <Badge bg="rgba(6,182,212,0.11)"  fg="#67e8f9">{MONTHS[curM]} {curY}</Badge>
             <Badge bg="rgba(34,197,94,0.1)"   fg="#4ade80">{paidCnt}/{expenses.length} Paid</Badge>
@@ -891,10 +1019,10 @@ export default function App() {
           </div>
         </div>
 
-        {/* ══ ALERTS ══ */}
+        {/* ALERTS */}
         <AlertBanner alerts={alerts}/>
 
-        {/* ══ HISTORY STRIP ══ */}
+        {/* HISTORY STRIP */}
         {allKeys.length > 1 && (
           <div style={{ marginBottom:14, padding:"11px 14px",
             background:"rgba(99,102,241,0.04)", border:"1px solid rgba(99,102,241,0.1)",
@@ -910,14 +1038,15 @@ export default function App() {
                 const isA     = k === monthKey;
                 return (
                   <div key={k} onClick={()=>{sCY(ky);sCM(km);}}
-                    style={{ padding:"9px 12px", borderRadius:10, cursor:"pointer", minWidth:106, flexShrink:0,
+                    style={{ padding:"9px 12px", borderRadius:10, cursor:"pointer",
+                      minWidth:106, flexShrink:0, transition:"all .2s",
                       border:`1px solid ${isA?"rgba(6,182,212,0.4)":"rgba(255,255,255,0.06)"}`,
-                      background:isA?"rgba(6,182,212,0.08)":"rgba(255,255,255,0.02)", transition:"all .2s" }}>
+                      background:isA?"rgba(6,182,212,0.08)":"rgba(255,255,255,0.02)" }}>
                     <div style={{ fontSize:10, fontWeight:700, color:isA?"#67e8f9":"#4a90d9", marginBottom:4 }}>
                       {MONTHS[km].slice(0,3)} {ky}
                     </div>
-                    <div style={{ fontSize:11, color:"#4ade80",  fontWeight:700 }}>{fmt(inc)}</div>
-                    <div style={{ fontSize:10, color:"#f87171"              }}>{fmt(exp)}</div>
+                    <div style={{ fontSize:11, color:"#4ade80", fontWeight:700 }}>{fmt(inc)}</div>
+                    <div style={{ fontSize:10, color:"#f87171" }}>{fmt(exp)}</div>
                     <div style={{ fontSize:10, color:sav>=0?"#c4b5fd":"#fb923c", fontWeight:700, marginTop:2 }}>
                       {sav>=0?"+":""}{fmt(sav)}
                     </div>
@@ -928,7 +1057,7 @@ export default function App() {
           </div>
         )}
 
-        {/* ══ FINANCIAL OVERVIEW ══ */}
+        {/* FINANCIAL OVERVIEW */}
         <div style={{ fontSize:9, fontWeight:700, letterSpacing:"0.13em", textTransform:"uppercase", color:"#2a3a4a", marginBottom:9 }}>
           Financial Overview
         </div>
@@ -955,7 +1084,7 @@ export default function App() {
           <MCard label="Debt Clearance" value={`${debtPct}%`}  color="#fb923c"/>
         </div>
 
-        {/* ══ INCOME TABLE ══ */}
+        {/* INCOME TABLE */}
         <Card className="su">
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:8 }}>
             <span style={{ fontSize:11, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", color:"#4ade80" }}>▸ Income Tracker</span>
@@ -964,39 +1093,41 @@ export default function App() {
           <div className="ts">
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead><tr>
-                <th style={TH}>Source</th>
-                <th style={{...TH,textAlign:"right",width:110}} className="hm">Budgeted</th>
-                <th style={{...TH,textAlign:"right",width:110}}>Actual</th>
-                <th style={{...TH,textAlign:"right",width:90}}>Variance</th>
-                <th style={{...TH,width:36}}/>
+                <th style={TH_STYLE}>Source</th>
+                <th style={{...TH_STYLE,textAlign:"right",width:110}} className="hm">Budgeted</th>
+                <th style={{...TH_STYLE,textAlign:"right",width:110}}>Actual</th>
+                <th style={{...TH_STYLE,textAlign:"right",width:90}}>Variance</th>
+                <th style={{...TH_STYLE,width:36}}/>
               </tr></thead>
               <tbody>
                 {income.map(row => {
                   const v = (row.actual||0)-(row.budgeted||0);
                   return (
-                    <FadeRow key={row.id} visible={vis[row.id]??false}>
-                      <td style={TD}><TxtInput value={row.source} onChange={v=>setI(row.id,"source",v)} placeholder="Income source..."/></td>
-                      <td style={{...TD,textAlign:"right"}} className="hm"><NumInput value={row.budgeted} onChange={v=>setI(row.id,"budgeted",v)}/></td>
-                      <td style={{...TD,textAlign:"right"}}><NumInput value={row.actual} onChange={v=>setI(row.id,"actual",v)}/></td>
-                      <td style={{...TD,textAlign:"right"}}><span style={{ fontWeight:700, fontSize:12, color:v>=0?"#4ade80":"#f87171" }}>{v>=0?"+":""}{fmt(v)}</span></td>
-                      <td style={TD}><DelBtn onClick={()=>delI(row.id)}/></td>
+                    <FadeRow key={row.id} visible={vis[row.id]??true}>
+                      <td style={TD_STYLE}><TxtInput value={row.source} onChange={v=>setI(row.id,"source",v)} placeholder="Income source..."/></td>
+                      <td style={{...TD_STYLE,textAlign:"right"}} className="hm"><NumInput value={row.budgeted} onChange={v=>setI(row.id,"budgeted",v)}/></td>
+                      <td style={{...TD_STYLE,textAlign:"right"}}><NumInput value={row.actual} onChange={v=>setI(row.id,"actual",v)}/></td>
+                      <td style={{...TD_STYLE,textAlign:"right"}}>
+                        <span style={{ fontWeight:700, fontSize:12, color:v>=0?"#4ade80":"#f87171" }}>{v>=0?"+":""}{fmt(v)}</span>
+                      </td>
+                      <td style={TD_STYLE}><DelBtn onClick={()=>delI(row.id)}/></td>
                     </FadeRow>
                   );
                 })}
               </tbody>
               <tfoot><tr>
-                <td style={{...TD,fontWeight:800,color:"#4ade80",borderTop:"1px solid rgba(34,197,94,0.14)"}}>Total</td>
-                <td style={{...TD,textAlign:"right",color:"#3d5166",borderTop:"1px solid rgba(34,197,94,0.14)"}} className="hm">{fmt(bgtInc)}</td>
-                <td style={{...TD,textAlign:"right",fontWeight:800,color:"#4ade80",fontSize:15,borderTop:"1px solid rgba(34,197,94,0.14)"}}>{fmt(totalInc)}</td>
+                <td style={{...TD_STYLE,fontWeight:800,color:"#4ade80",borderTop:"1px solid rgba(34,197,94,0.14)"}}>Total</td>
+                <td style={{...TD_STYLE,textAlign:"right",color:"#3d5166",borderTop:"1px solid rgba(34,197,94,0.14)"}} className="hm">{fmt(bgtInc)}</td>
+                <td style={{...TD_STYLE,textAlign:"right",fontWeight:800,color:"#4ade80",fontSize:15,borderTop:"1px solid rgba(34,197,94,0.14)"}}>{fmt(totalInc)}</td>
                 <td colSpan={2} style={{borderTop:"1px solid rgba(34,197,94,0.14)"}}/>
               </tr></tfoot>
             </table>
           </div>
         </Card>
 
-        {/* ══ EXPENSE TABLE ══ */}
+        {/* EXPENSE TABLE */}
         <Card className="su">
-          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14, flexWrap:"wrap", gap:8 }}>
+          <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, flexWrap:"wrap", gap:8 }}>
             <div>
               <span style={{ fontSize:11, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", color:"#f87171" }}>▸ Expense Tracker</span>
               <span style={{ marginLeft:10, fontSize:11, color:"#3d5166" }}>
@@ -1006,54 +1137,94 @@ export default function App() {
             </div>
             <AddBtn onClick={addE} label="Add Expense" color="#f87171"/>
           </div>
+
+          {/* FIX: NEW — search + category filter bar */}
+          <div style={{ display:"flex", gap:8, marginBottom:12, flexWrap:"wrap", alignItems:"center" }}>
+            <SearchBar value={expSearch} onChange={setExpSearch} placeholder="Search expenses or notes..."/>
+            <div style={{ display:"flex", gap:4, flexWrap:"wrap" }}>
+              {expCats.map(cat => (
+                <button key={cat} onClick={()=>setExpCat(cat)}
+                  style={{ padding:"4px 10px", borderRadius:20, fontSize:11, fontWeight:700,
+                    cursor:"pointer", fontFamily:"inherit", border:"none", transition:"all .15s",
+                    background:expCat===cat
+                      ? (cat==="All"?"rgba(6,182,212,0.25)":CAT_CLR[cat]+"30")
+                      : "rgba(255,255,255,0.04)",
+                    color:expCat===cat
+                      ? (cat==="All"?"#67e8f9":CAT_CLR[cat]||"#94a3b8")
+                      : "#3d5166" }}>
+                  {cat}
+                </button>
+              ))}
+            </div>
+          </div>
+          {(expSearch || expCat!=="All") && (
+            <div style={{ fontSize:11, color:"#3d5166", marginBottom:8 }}>
+              Showing {filteredExp.length} of {expenses.length} items
+              {expSearch && <> · <span style={{ color:"#67e8f9" }}>"{expSearch}"</span></>}
+              {expCat!=="All" && <> · <span style={{ color:CAT_CLR[expCat] }}>{expCat}</span></>}
+            </div>
+          )}
+
           <div className="ts">
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead><tr>
-                <th style={{...TH,width:32,textAlign:"center"}}>✓</th>
-                <th style={TH}>Expense</th>
-                <th style={{...TH,width:100}} className="hm">Category</th>
-                <th style={{...TH,textAlign:"right",width:110}} className="hm">Budgeted</th>
-                <th style={{...TH,textAlign:"right",width:110}}>Actual</th>
-                <th style={{...TH,width:36}}/>
+                <th style={{...TH_STYLE,width:32,textAlign:"center"}}>✓</th>
+                <th style={TH_STYLE}>Expense</th>
+                <th style={{...TH_STYLE,width:100}} className="hm">Category</th>
+                <th style={{...TH_STYLE,textAlign:"right",width:110}} className="hm">Budgeted</th>
+                <th style={{...TH_STYLE,textAlign:"right",width:110}}>Actual</th>
+                <th style={{...TH_STYLE,width:60}} className="hm">Notes</th>
+                <th style={{...TH_STYLE,width:36}}/>
               </tr></thead>
               <tbody>
-                {expenses.map(row => (
-                  <FadeRow key={row.id} visible={vis[row.id]??false}>
-                    <td style={{...TD,textAlign:"center"}} className={`er ${row.paid?"paid":""}`}>
+                {filteredExp.map(row => (
+                  <FadeRow key={row.id} visible={vis[row.id]??true}>
+                    <td style={{...TD_STYLE,textAlign:"center"}} className={`er ${row.paid?"paid":""}`}>
                       <input type="checkbox" checked={row.paid} onChange={()=>setE(row.id,"paid",!row.paid)}
                         style={{ width:16, height:16, cursor:"pointer", accentColor:"#06b6d4" }}/>
                     </td>
-                    <td style={TD} className={`er ${row.paid?"paid":""}`}>
+                    <td style={TD_STYLE} className={`er ${row.paid?"paid":""}`}>
                       <div style={{ display:"flex", alignItems:"center", gap:6, flexWrap:"wrap" }}>
                         <TxtInput value={row.name} onChange={v=>setE(row.id,"name",v)} placeholder="Expense name..."/>
                         {row.paid && <Badge bg="rgba(239,68,68,0.1)" fg="#fca5a5">PAID</Badge>}
                       </div>
                     </td>
-                    <td style={TD} className={`er ${row.paid?"paid":""} hm`}>
+                    <td style={TD_STYLE} className={`er ${row.paid?"paid":""} hm`}>
                       <CatSelect value={row.category||"Essential"} onChange={v=>setE(row.id,"category",v)}/>
                     </td>
-                    <td style={{...TD,textAlign:"right"}} className={`er ${row.paid?"paid":""} hm`}>
+                    <td style={{...TD_STYLE,textAlign:"right"}} className={`er ${row.paid?"paid":""} hm`}>
                       <NumInput value={row.budgeted} onChange={v=>setE(row.id,"budgeted",v)}/>
                     </td>
-                    <td style={{...TD,textAlign:"right"}} className={`er ${row.paid?"paid":""}`}>
+                    <td style={{...TD_STYLE,textAlign:"right"}} className={`er ${row.paid?"paid":""}`}>
                       <NumInput value={row.actual} onChange={v=>setE(row.id,"actual",v)}/>
                     </td>
-                    <td style={TD}><DelBtn onClick={()=>delE(row.id)}/></td>
+                    {/* FIX: NEW — notes column */}
+                    <td style={TD_STYLE} className="hm">
+                      <NotesInput value={row.notes||""} onChange={v=>setE(row.id,"notes",v)}/>
+                    </td>
+                    <td style={TD_STYLE}><DelBtn onClick={()=>delE(row.id)}/></td>
                   </FadeRow>
                 ))}
+                {filteredExp.length===0 && (
+                  <tr>
+                    <td colSpan={7} style={{ padding:"20px", textAlign:"center", color:"#3d5166", fontSize:12 }}>
+                      {expenses.length===0 ? "No expenses yet — add one above" : "No results match your filter"}
+                    </td>
+                  </tr>
+                )}
               </tbody>
               <tfoot><tr>
-                <td colSpan={2} style={{...TD,fontWeight:800,color:"#f87171",borderTop:"1px solid rgba(239,68,68,0.12)"}}>Total</td>
+                <td colSpan={2} style={{...TD_STYLE,fontWeight:800,color:"#f87171",borderTop:"1px solid rgba(239,68,68,0.12)"}}>Total</td>
                 <td style={{borderTop:"1px solid rgba(239,68,68,0.12)"}} className="hm"/>
-                <td style={{...TD,textAlign:"right",color:"#3d5166",borderTop:"1px solid rgba(239,68,68,0.12)"}} className="hm">{fmt(bgtExp)}</td>
-                <td style={{...TD,textAlign:"right",fontWeight:800,color:"#f87171",fontSize:15,borderTop:"1px solid rgba(239,68,68,0.12)"}}>{fmt(totalExp)}</td>
-                <td style={{borderTop:"1px solid rgba(239,68,68,0.12)"}}/>
+                <td style={{...TD_STYLE,textAlign:"right",color:"#3d5166",borderTop:"1px solid rgba(239,68,68,0.12)"}} className="hm">{fmt(bgtExp)}</td>
+                <td style={{...TD_STYLE,textAlign:"right",fontWeight:800,color:"#f87171",fontSize:15,borderTop:"1px solid rgba(239,68,68,0.12)"}}>{fmt(totalExp)}</td>
+                <td colSpan={2} style={{borderTop:"1px solid rgba(239,68,68,0.12)"}}/>
               </tr></tfoot>
             </table>
           </div>
         </Card>
 
-        {/* ══ DEBT TABLE ══ */}
+        {/* DEBT TABLE */}
         <Card style={{ background:"rgba(99,102,241,0.035)", border:"1px solid rgba(99,102,241,0.1)" }} className="su">
           <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:16, flexWrap:"wrap", gap:8 }}>
             <div>
@@ -1068,14 +1239,15 @@ export default function App() {
           <div className="ts" style={{ marginBottom:16 }}>
             <table style={{ width:"100%", borderCollapse:"collapse", fontSize:13 }}>
               <thead><tr>
-                <th style={{...TH,width:32,textAlign:"center"}}>✓</th>
-                <th style={TH}>Debt / Installment</th>
-                <th style={{...TH,textAlign:"right",width:110}} className="hm">Total</th>
-                <th style={{...TH,textAlign:"right",width:110}}>Paid</th>
-                <th style={{...TH,textAlign:"right",width:100}}>Remaining</th>
-                <th style={{...TH,width:130}} className="hm">Progress</th>
-                <th style={{...TH,width:130}} className="hm">Due Date</th>
-                <th style={{...TH,width:36}}/>
+                <th style={{...TH_STYLE,width:32,textAlign:"center"}}>✓</th>
+                <th style={TH_STYLE}>Debt / Installment</th>
+                <th style={{...TH_STYLE,textAlign:"right",width:110}} className="hm">Total</th>
+                <th style={{...TH_STYLE,textAlign:"right",width:110}}>Paid</th>
+                <th style={{...TH_STYLE,textAlign:"right",width:100}}>Remaining</th>
+                <th style={{...TH_STYLE,width:130}} className="hm">Progress</th>
+                <th style={{...TH_STYLE,width:130}} className="hm">Due Date</th>
+                <th style={{...TH_STYLE,width:60}} className="hm">Notes</th>
+                <th style={{...TH_STYLE,width:36}}/>
               </tr></thead>
               <tbody>
                 {debts.map(row => {
@@ -1084,47 +1256,49 @@ export default function App() {
                   const p    = pct(row.paid||0, row.totalDebt||1);
                   const col  = done?"#34d399":p>=75?"#fbbf24":"#818cf8";
                   return (
-                    <FadeRow key={row.id} visible={vis[row.id]??false}>
-                      <td style={{...TD,textAlign:"center"}} className={`dr ${done?"done":""}`}>
+                    <FadeRow key={row.id} visible={vis[row.id]??true}>
+                      <td style={{...TD_STYLE,textAlign:"center"}} className={`dr ${done?"done":""}`}>
                         <input type="checkbox" checked={row.completed} onChange={()=>setD(row.id,"completed",!row.completed)}
                           style={{ width:16, height:16, cursor:"pointer", accentColor:"#34d399" }}/>
                       </td>
-                      <td style={TD} className={`dr ${done?"done":""}`}>
+                      <td style={TD_STYLE} className={`dr ${done?"done":""}`}>
                         <TxtInput value={row.name} onChange={v=>setD(row.id,"name",v)} placeholder="Debt name..."/>
                         {row.carriedOver && <span style={{ fontSize:9, color:"#fbbf24", marginLeft:4 }}>↩ carried over</span>}
                       </td>
-                      <td style={{...TD,textAlign:"right"}} className={`dr ${done?"done":""} hm`}>
+                      <td style={{...TD_STYLE,textAlign:"right"}} className={`dr ${done?"done":""} hm`}>
                         <NumInput value={row.totalDebt} onChange={v=>setD(row.id,"totalDebt",v)}/>
                       </td>
-                      <td style={{...TD,textAlign:"right"}} className={`dr ${done?"done":""}`}>
+                      <td style={{...TD_STYLE,textAlign:"right"}} className={`dr ${done?"done":""}`}>
                         <NumInput value={row.paid} onChange={v=>setD(row.id,"paid",clamp(v,0,row.totalDebt||999999))}/>
                       </td>
-                      <td style={{...TD,textAlign:"right",fontWeight:700,color:done?"#34d399":rem>0?"#f87171":"#4ade80"}}>{fmt(rem)}</td>
-                      <td style={TD} className="hm">
+                      <td style={{...TD_STYLE,textAlign:"right",fontWeight:700,color:done?"#34d399":rem>0?"#f87171":"#4ade80"}}>{fmt(rem)}</td>
+                      <td style={TD_STYLE} className="hm">
                         <div style={{ minWidth:90 }}>
                           <div style={{ fontSize:9, color:col, fontWeight:700, marginBottom:3 }}>{p}%</div>
                           <ProgBar value={row.paid||0} total={row.totalDebt||0} color={col} height={5}/>
                         </div>
                       </td>
-                      <td style={TD} className="hm">
+                      <td style={TD_STYLE} className="hm">
                         <DateInput value={row.dueDate||""} onChange={v=>setD(row.id,"dueDate",v)}/>
                       </td>
-                      <td style={TD}><DelBtn onClick={()=>delD(row.id)}/></td>
+                      <td style={TD_STYLE} className="hm">
+                        <NotesInput value={row.notes||""} onChange={v=>setD(row.id,"notes",v)}/>
+                      </td>
+                      <td style={TD_STYLE}><DelBtn onClick={()=>delD(row.id)}/></td>
                     </FadeRow>
                   );
                 })}
               </tbody>
               <tfoot><tr>
-                <td colSpan={2} style={{...TD,fontWeight:800,color:"#818cf8",borderTop:"1px solid rgba(99,102,241,0.14)"}}>Totals</td>
-                <td style={{...TD,textAlign:"right",fontWeight:700,color:"#c8d3e0",borderTop:"1px solid rgba(99,102,241,0.14)"}} className="hm">{fmt(totalDebt)}</td>
-                <td style={{...TD,textAlign:"right",fontWeight:700,color:"#34d399",borderTop:"1px solid rgba(99,102,241,0.14)"}}>{fmt(totalPaid)}</td>
-                <td style={{...TD,textAlign:"right",fontWeight:800,color:"#f87171",fontSize:14,borderTop:"1px solid rgba(99,102,241,0.14)"}}>{fmt(remDebt)}</td>
-                <td colSpan={3} style={{borderTop:"1px solid rgba(99,102,241,0.14)"}}/>
+                <td colSpan={2} style={{...TD_STYLE,fontWeight:800,color:"#818cf8",borderTop:"1px solid rgba(99,102,241,0.14)"}}>Totals</td>
+                <td style={{...TD_STYLE,textAlign:"right",fontWeight:700,color:"#c8d3e0",borderTop:"1px solid rgba(99,102,241,0.14)"}} className="hm">{fmt(totalDebt)}</td>
+                <td style={{...TD_STYLE,textAlign:"right",fontWeight:700,color:"#34d399",borderTop:"1px solid rgba(99,102,241,0.14)"}}>{fmt(totalPaid)}</td>
+                <td style={{...TD_STYLE,textAlign:"right",fontWeight:800,color:"#f87171",fontSize:14,borderTop:"1px solid rgba(99,102,241,0.14)"}}>{fmt(remDebt)}</td>
+                <td colSpan={4} style={{borderTop:"1px solid rgba(99,102,241,0.14)"}}/>
               </tr></tfoot>
             </table>
           </div>
 
-          {/* Individual debt cards */}
           {debts.length > 0 && (
             <>
               <div style={{ fontSize:9, fontWeight:700, letterSpacing:"0.1em", textTransform:"uppercase",
@@ -1132,14 +1306,12 @@ export default function App() {
                 Individual Progress
               </div>
               <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(210px,1fr))", gap:10, marginBottom:16 }}>
-                {debts.map(row => <DebtCard key={row.id} row={row} visible={vis[row.id]??false}/>)}
+                {debts.map(row => <DebtCard key={row.id} row={row} visible={vis[row.id]??true}/>)}
               </div>
             </>
           )}
 
-          {/* Overall debt progress */}
-          <div style={{ padding:"14px 16px", background:"rgba(99,102,241,0.07)",
-            borderRadius:12, border:"1px solid rgba(99,102,241,0.12)" }}>
+          <div style={{ padding:"14px 16px", background:"rgba(99,102,241,0.07)", borderRadius:12, border:"1px solid rgba(99,102,241,0.12)" }}>
             <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:10, flexWrap:"wrap", gap:8 }}>
               <div>
                 <div style={{ fontSize:11, fontWeight:700, color:"#818cf8", textTransform:"uppercase", marginBottom:4 }}>Overall Debt Clearance</div>
@@ -1156,20 +1328,15 @@ export default function App() {
           </div>
         </Card>
 
-        {/* ══ SAVINGS SECTION ══ */}
+        {/* SAVINGS */}
         <Card style={{ background:"rgba(196,181,253,0.04)", border:"1px solid rgba(196,181,253,0.1)" }} className="su">
           <span style={{ fontSize:11, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", color:"#c4b5fd" }}>▸ Savings Tracker</span>
           <div className="cr" style={{ display:"flex", gap:12, flexWrap:"wrap", marginTop:14, marginBottom:14 }}>
-            <MCard label={`${MONTHS[curM]} Savings`} value={fmt(mthSav)} color={mthSav>=0?"#c4b5fd":"#f87171"}
-              sub="Income − Expenses − Loans" danger={mthSav<0}/>
-            <MCard label="Total Accumulated" value={fmt(cumSav)} color="#a5b4fc"
-              sub={`From ${allKeys.length} month${allKeys.length!==1?"s":""}`}/>
+            <MCard label={`${MONTHS[curM]} Savings`} value={fmt(mthSav)} color={mthSav>=0?"#c4b5fd":"#f87171"} sub="Income − Expenses − Loans" danger={mthSav<0}/>
+            <MCard label="Total Accumulated" value={fmt(cumSav)} color="#a5b4fc" sub={`From ${allKeys.length} month${allKeys.length!==1?"s":""}`}/>
             <MCard label="Savings Rate" value={`${pct(Math.max(0,mthSav),totalInc||1)}%`}
-              color={mthSav/Math.max(totalInc,1)>=0.2?"#34d399":"#fbbf24"}
-              sub="of total income saved"/>
+              color={mthSav/Math.max(totalInc,1)>=0.2?"#34d399":"#fbbf24"} sub="of total income saved"/>
           </div>
-
-          {/* Savings rate bar */}
           {totalInc > 0 && (
             <div style={{ marginBottom:14, padding:"12px 14px",
               background:"rgba(196,181,253,0.06)", borderRadius:10, border:"1px solid rgba(196,181,253,0.1)" }}>
@@ -1183,8 +1350,6 @@ export default function App() {
               </div>
             </div>
           )}
-
-          {/* Savings growth chart */}
           {Object.keys(store.months).length >= 2 && (
             <>
               <div style={{ fontSize:9, fontWeight:700, letterSpacing:"0.08em", textTransform:"uppercase", color:"#3d5166", marginBottom:8 }}>
@@ -1195,10 +1360,10 @@ export default function App() {
           )}
         </Card>
 
-        {/* ══ MASTER SUMMARY ══ */}
-        <div style={{ padding:"14px 18px",
-          background:"rgba(6,182,212,0.03)", border:"1px solid rgba(6,182,212,0.08)",
-          borderRadius:12, display:"flex", gap:18, flexWrap:"wrap", alignItems:"center" }}>
+        {/* MASTER SUMMARY */}
+        <div style={{ padding:"14px 18px", background:"rgba(6,182,212,0.03)",
+          border:"1px solid rgba(6,182,212,0.08)", borderRadius:12,
+          display:"flex", gap:18, flexWrap:"wrap", alignItems:"center" }}>
           <span style={{ fontSize:9, fontWeight:700, letterSpacing:"0.12em", textTransform:"uppercase", color:"#2a3a4a", flexShrink:0 }}>
             Summary — {MONTHS[curM]} {curY}
           </span>
@@ -1217,9 +1382,9 @@ export default function App() {
           ))}
         </div>
 
-      </div>{/* /wrap */}
+      </div>
 
-      {/* ══ CHARTS MODAL ══ */}
+      {/* CHARTS MODAL */}
       {modal==="charts" && (
         <div style={{ position:"fixed", inset:0, zIndex:1000, background:"rgba(0,0,0,0.85)",
           display:"flex", alignItems:"flex-start", justifyContent:"center",
@@ -1232,33 +1397,27 @@ export default function App() {
               <Btn onClick={()=>sm(null)} color="#67e8f9" size="sm">Close</Btn>
             </div>
             <div style={{ marginBottom:24 }}>
-              <div style={{ fontSize:10, fontWeight:700, color:"#3d5166", textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10 }}>
-                Income vs Expenses (Last 6 Months)
-              </div>
+              <div style={{ fontSize:10, fontWeight:700, color:"#3d5166", textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10 }}>Income vs Expenses (Last 6 Months)</div>
               <TrendChart allData={store.months}/>
             </div>
             <div style={{ marginBottom:24 }}>
-              <div style={{ fontSize:10, fontWeight:700, color:"#3d5166", textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10 }}>
-                Cumulative Savings Growth
-              </div>
+              <div style={{ fontSize:10, fontWeight:700, color:"#3d5166", textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10 }}>Cumulative Savings Growth</div>
               <SavingsChart allData={store.months}/>
             </div>
             <div>
-              <div style={{ fontSize:10, fontWeight:700, color:"#3d5166", textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10 }}>
-                Expense Breakdown — {MONTHS[curM]}
-              </div>
+              <div style={{ fontSize:10, fontWeight:700, color:"#3d5166", textTransform:"uppercase", letterSpacing:"0.09em", marginBottom:10 }}>Expense Breakdown — {MONTHS[curM]}</div>
               <DonutChart expenses={expenses}/>
             </div>
           </div>
         </div>
       )}
 
-      {/* ══ HISTORY MODAL ══ */}
+      {/* HISTORY MODAL */}
       {modal==="history" && (
         <HistoryMgr store={store} onUpdate={s=>SS(s)} onClose={()=>sm(null)}/>
       )}
 
-      {/* ══ TEMPLATES MODAL ══ */}
+      {/* TEMPLATES MODAL */}
       {modal==="templates" && (
         <TemplateMgr
           templates={store.templates||defaultTemplates()}
