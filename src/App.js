@@ -17,7 +17,6 @@ const TD = { padding:"8px 10px",borderBottom:"1px solid rgba(255,255,255,0.032)"
 const fmt   = n  => "৳" + Math.round(n||0).toLocaleString("en-IN");
 const pct   = (a,b) => b>0 ? Math.min(100,Math.round((a/b)*100)) : 0;
 const uid   = () => Date.now().toString(36)+Math.random().toString(36).slice(2);
-const clamp = (v,lo,hi) => Math.min(hi,Math.max(lo,v));
 const mkKey = (y,m) => `${y}-${String(m+1).padStart(2,"0")}`;
 const k2ym  = k  => { const[y,m]=k.split("-"); return[+y,+m-1]; };
 const nowKey= () => { const d=new Date(); return mkKey(d.getFullYear(),d.getMonth()); };
@@ -35,7 +34,9 @@ async function loadStore() {
       const d = JSON.parse(r.value);
       if (d?.months) return migrateToV6(d);
     }
-  } catch {}
+  } catch(e) {
+    console.warn("loadStore failed:", e);
+  }
   return makeDefaultStore();
 }
 
@@ -46,7 +47,7 @@ async function saveStore(data) {
 
 /* Migrate old per-month debts → global debts array */
 function migrateToV6(d) {
-  if (Array.isArray(d.debts)) return d; // already v6
+  if (Array.isArray(d.debts)) return d;
   const seen = {};
   const globalDebts = [];
   Object.keys(d.months||{}).sort().forEach(mk => {
@@ -68,6 +69,21 @@ function migrateToV6(d) {
     delete d.months[mk].debts;
   });
   return { ...d, debts: globalDebts };
+}
+
+/* ═══════════════════════════════════════════════
+   VALIDATION — import guard
+═══════════════════════════════════════════════ */
+function validateBackup(d) {
+  if (!d || typeof d !== "object") return false;
+  if (!d.months || typeof d.months !== "object") return false;
+  // Ensure each month has expected shape
+  for (const [k, v] of Object.entries(d.months)) {
+    if (!/^\d{4}-\d{2}$/.test(k)) return false;
+    if (!Array.isArray(v.income) || !Array.isArray(v.expenses)) return false;
+  }
+  if (d.debts !== undefined && !Array.isArray(d.debts)) return false;
+  return true;
 }
 
 /* ═══════════════════════════════════════════════
@@ -96,7 +112,7 @@ function makeDefaultStore() {
     months:{ [ck]: blankMonth(defaultTemplates()) },
     debts: [],
     templates: defaultTemplates(),
-    lastAutoInit: null,
+    lastAutoInit: ck,
   };
 }
 
@@ -109,7 +125,7 @@ function blankMonth(tmpl) {
 }
 
 /* ═══════════════════════════════════════════════
-   CALCULATIONS  (debts are now GLOBAL with per-month payments)
+   CALCULATIONS
 ═══════════════════════════════════════════════ */
 function calcMonth(md, globalDebts, monthKey) {
   const inc   = (md?.income||[]).reduce((s,i)=>s+(i.actual||0),0);
@@ -163,18 +179,29 @@ function exportCSV(monthKey, md, globalDebts) {
   });
   const {inc,exp,dpaid,sav}=calcMonth(md,globalDebts,monthKey);
   csv+=`\nSUMMARY\nTotal Income,${inc}\nTotal Expenses,${exp}\nLoan Payments,${dpaid}\nMonthly Savings,${sav}\n`;
-  const a=Object.assign(document.createElement("a"),{
-    href:URL.createObjectURL(new Blob([csv],{type:"text/csv"})),
-    download:`finance-${monthKey}.csv`
-  });
-  a.click(); URL.revokeObjectURL(a.href);
+  try {
+    const blob = new Blob([csv],{type:"text/csv"});
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement("a"),{ href:url, download:`finance-${monthKey}.csv` });
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  } catch(e) { console.error("CSV export failed:", e); }
 }
+
 function exportBackup(store) {
-  const a=Object.assign(document.createElement("a"),{
-    href:URL.createObjectURL(new Blob([JSON.stringify(store,null,2)],{type:"application/json"})),
-    download:`finance-backup-${new Date().toISOString().slice(0,10)}.json`
-  });
-  a.click(); URL.revokeObjectURL(a.href);
+  try {
+    const blob = new Blob([JSON.stringify(store,null,2)],{type:"application/json"});
+    const url = URL.createObjectURL(blob);
+    const a = Object.assign(document.createElement("a"),{
+      href:url, download:`finance-backup-${new Date().toISOString().slice(0,10)}.json`
+    });
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(()=>URL.revokeObjectURL(url), 1000);
+  } catch(e) { console.error("Backup export failed:", e); }
 }
 
 /* ═══════════════════════════════════════════════
@@ -197,12 +224,49 @@ function LoadingScreen() {
 }
 
 /* ═══════════════════════════════════════════════
+   ERROR BOUNDARY
+═══════════════════════════════════════════════ */
+class ErrorBoundary extends React.Component {
+  constructor(props) { super(props); this.state = { hasError: false, error: null }; }
+  static getDerivedStateFromError(error) { return { hasError: true, error }; }
+  render() {
+    if (this.state.hasError) return (
+      <div style={{minHeight:"100vh",background:"#07090e",display:"flex",alignItems:"center",
+        justifyContent:"center",flexDirection:"column",gap:16,padding:24}}>
+        <div style={{fontSize:32}}>⚠️</div>
+        <div style={{color:"#f87171",fontSize:16,fontWeight:700}}>Something went wrong</div>
+        <div style={{color:"#3d5166",fontSize:12,maxWidth:400,textAlign:"center"}}>
+          {this.state.error?.message||"An unexpected error occurred."}
+        </div>
+        <button onClick={()=>this.setState({hasError:false,error:null})}
+          style={{padding:"8px 20px",borderRadius:8,background:"rgba(6,182,212,0.15)",
+            border:"1px solid rgba(6,182,212,0.4)",color:"#67e8f9",cursor:"pointer",
+            fontFamily:"inherit",fontSize:13}}>Try Again</button>
+      </div>
+    );
+    return this.props.children;
+  }
+}
+
+/* ═══════════════════════════════════════════════
    BASE UI COMPONENTS
 ═══════════════════════════════════════════════ */
+
+/* FIX: NumInput — use local string state so user can clear field before typing */
 function NumInput({ value, onChange, width=108 }) {
-  const [f,sf]=useState(false);
-  return <input type="number" value={value} onChange={e=>onChange(+e.target.value||0)}
-    onFocus={()=>sf(true)} onBlur={()=>sf(false)} className="hs"
+  const [f,sf] = useState(false);
+  const [local,setLocal] = useState(String(value||0));
+
+  // Sync external value changes (e.g. month switch) while not focused
+  useEffect(()=>{ if(!f) setLocal(String(value||0)); },[value,f]);
+
+  return <input
+    type="number"
+    value={local}
+    onChange={e=>{ setLocal(e.target.value); const n=parseFloat(e.target.value); if(!isNaN(n)) onChange(n); }}
+    onFocus={()=>{ sf(true); if(local==="0") setLocal(""); }}
+    onBlur={()=>{ sf(false); const n=parseFloat(local); const v=isNaN(n)?0:n; setLocal(String(v)); onChange(v); }}
+    className="hs"
     style={{background:"rgba(255,255,255,0.05)",border:`1px solid ${f?"#06b6d4":"rgba(255,255,255,0.1)"}`,
       borderRadius:8,padding:"6px 8px",color:"#dde4ee",fontSize:13,width,outline:"none",
       fontFamily:"inherit",boxSizing:"border-box",transition:"border-color .15s"}}/>;
@@ -249,7 +313,6 @@ function CatSelect({ value, onChange }) {
   </select>;
 }
 
-/* NEW — link an expense to a global debt */
 function DebtSelect({ value, onChange, globalDebts }) {
   const active=(globalDebts||[]).filter(d=>!d.completed);
   if(!active.length) return null;
@@ -420,7 +483,7 @@ function MCard({ label, value, sub, color="#94a3b8", isHero, danger }) {
 }
 
 /* ═══════════════════════════════════════════════
-   DEBT MINI CARD  (uses global debt + sumPay)
+   DEBT MINI CARD
 ═══════════════════════════════════════════════ */
 function DebtCard({ row, visible }) {
   const paid = sumPay(row);
@@ -462,19 +525,29 @@ function DebtCard({ row, visible }) {
 ═══════════════════════════════════════════════ */
 function MonthNav({ year, month, onChange, allKeys }) {
   const [open,so]=useState(false);
+  const ref=useRef();
   const key=mkKey(year,month);
   const go=useCallback(dir=>{let m=month+dir,y=year;if(m<0){m=11;y--;}if(m>11){m=0;y++;}onChange(y,m);},[month,year,onChange]);
+
+  // FIX: close dropdown when clicking outside
+  useEffect(()=>{
+    if(!open) return;
+    const handler=(e)=>{ if(ref.current&&!ref.current.contains(e.target)) so(false); };
+    document.addEventListener("mousedown",handler);
+    return()=>document.removeEventListener("mousedown",handler);
+  },[open]);
+
   const bs={borderRadius:8,border:"1px solid rgba(6,182,212,0.3)",background:"rgba(6,182,212,0.08)",
     color:"#67e8f9",cursor:"pointer",fontFamily:"inherit",outline:"none"};
   return (
-    <div style={{display:"flex",alignItems:"center",gap:6,position:"relative"}}>
+    <div ref={ref} style={{display:"flex",alignItems:"center",gap:6,position:"relative"}}>
       <button onClick={()=>go(-1)} style={{...bs,width:32,height:32,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}>‹</button>
       <button onClick={()=>so(p=>!p)} style={{...bs,padding:"6px 14px",fontWeight:700,fontSize:13,minWidth:152,textAlign:"center"}}>
         {MONTHS[month]} {year} {open?"▲":"▼"}
       </button>
       <button onClick={()=>go(1)} style={{...bs,width:32,height:32,fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}>›</button>
       {open&&(
-        <div onClick={e=>e.stopPropagation()} style={{position:"absolute",top:42,left:38,zIndex:300,
+        <div style={{position:"absolute",top:42,left:38,zIndex:300,
           background:"#0d1117",border:"1px solid rgba(6,182,212,0.25)",borderRadius:12,padding:8,
           minWidth:200,boxShadow:"0 8px 32px rgba(0,0,0,0.7)",maxHeight:280,overflowY:"auto"}}>
           {[...allKeys].sort().map(k=>{
@@ -503,8 +576,7 @@ function HistoryMgr({ store, onUpdate, onClose }) {
   const del=useCallback(key=>{const m={...months};delete m[key];onUpdate({...store,months:m});},[months,store,onUpdate]);
   const clearAll=useCallback(()=>onUpdate({...store,months:{}}),[store,onUpdate]);
   const resetSec=useCallback((key,sec)=>{
-    const blank=(sec==="income"||sec==="expenses")?[]:0;
-    onUpdate({...store,months:{...months,[key]:{...months[key],[sec]:blank}}});
+    onUpdate({...store,months:{...months,[key]:{...months[key],[sec]:[]}}});
   },[months,store,onUpdate]);
   return (
     <div style={{position:"fixed",inset:0,zIndex:1000,background:"rgba(0,0,0,0.85)",
@@ -561,7 +633,6 @@ function HistoryMgr({ store, onUpdate, onClose }) {
 
 /* ═══════════════════════════════════════════════
    TEMPLATE MANAGER
-   FIX: new items are also applied to current month
 ═══════════════════════════════════════════════ */
 function TemplateMgr({ templates, currentMonth, onSave, onClose }) {
   const [t,st]=useState(()=>JSON.parse(JSON.stringify(templates)));
@@ -725,10 +796,11 @@ function DonutChart({ expenses }) {
 /* ═══════════════════════════════════════════════
    MAIN APP
 ═══════════════════════════════════════════════ */
-export default function App() {
+function App() {
   const now=new Date();
-  const [store,SS]       = useState(null);          // null = loading
+  const [store,SS]       = useState(null);
   const [loading,setLd]  = useState(true);
+  const [loadErr,setErr] = useState(null);
   const [curY,sCY]       = useState(now.getFullYear());
   const [curM,sCM]       = useState(now.getMonth());
   const [vis,sv]         = useState({});
@@ -737,11 +809,25 @@ export default function App() {
   const [expCat,setExpCat]       = useState("All");
   const fileRef = useRef();
   const saveTimer = useRef();
+  const didAutoInit = useRef(false);
 
   /* ── Load from window.storage on mount ── */
   useEffect(()=>{
-    loadStore().then(s=>{ SS(s); setLd(false); });
+    loadStore()
+      .then(s=>{ SS(s); setLd(false); })
+      .catch(e=>{ console.error(e); setErr(e.message||"Failed to load"); setLd(false); });
   },[]);
+
+  /* ── Auto-init current month — runs once after first load ── */
+  useEffect(()=>{
+    if(!store || didAutoInit.current) return;
+    didAutoInit.current = true;
+    const ck=nowKey();
+    SS(prev=>{
+      if(prev.months[ck]) return prev;
+      return{...prev,months:{...prev.months,[ck]:blankMonth(prev.templates)},lastAutoInit:ck};
+    });
+  },[store]);
 
   /* ── Debounced save on every store change ── */
   useEffect(()=>{
@@ -751,15 +837,19 @@ export default function App() {
     return()=>clearTimeout(saveTimer.current);
   },[store]);
 
-  /* ── Auto-init current month once ── */
-  useEffect(()=>{
-    if(!store) return;
-    const ck=nowKey();
-    SS(prev=>{
-      if(prev.months[ck]||prev.lastAutoInit===ck) return prev;
-      return{...prev,months:{...prev.months,[ck]:blankMonth(prev.templates)},lastAutoInit:ck};
-    });
-  },[store===null]); // eslint-disable-line react-hooks/exhaustive-deps
+  if(loadErr) return (
+    <div style={{minHeight:"100vh",background:"#07090e",display:"flex",alignItems:"center",
+      justifyContent:"center",flexDirection:"column",gap:12,padding:24}}>
+      <div style={{fontSize:32}}>⚠️</div>
+      <div style={{color:"#f87171",fontSize:15,fontWeight:700}}>Failed to load data</div>
+      <div style={{color:"#3d5166",fontSize:12}}>{loadErr}</div>
+      <button onClick={()=>window.location.reload()}
+        style={{padding:"8px 20px",borderRadius:8,background:"rgba(6,182,212,0.15)",
+          border:"1px solid rgba(6,182,212,0.4)",color:"#67e8f9",cursor:"pointer",fontFamily:"inherit",fontSize:13}}>
+        Reload
+      </button>
+    </div>
+  );
 
   if(loading||!store) return <LoadingScreen/>;
 
@@ -771,7 +861,7 @@ export default function App() {
   const globalDebts= store.debts||[];
   const isCur      = nowKey()===monthKey;
 
-  /* ── Sync vis when month changes ── */
+  /* ── Sync vis when month or data changes ── */
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(()=>{
     const m={};
@@ -790,7 +880,6 @@ export default function App() {
     return{...p,months:{...p.months,[monthKey]:{...c,expenses:fn(c.expenses||[])}}};
   }),[monthKey]);
 
-  /* ── Global debt updater ── */
   const updD=useCallback(fn=>SS(p=>({...p,debts:fn(p.debts||[])})),[]);
 
   const show=useCallback(id=>setTimeout(()=>sv(p=>({...p,[id]:true})),20),[]);
@@ -801,7 +890,7 @@ export default function App() {
   const delI=useCallback(id=>hide(id,()=>updI(a=>a.filter(r=>r.id!==id))),[hide,updI]);
   const setI=useCallback((id,k,v)=>updI(a=>a.map(r=>r.id===id?{...r,[k]:v}:r)),[updI]);
 
-  /* Expenses — FIX: auto-update linked debt when paid toggled */
+  /* FIX: setE uses functional updater so monthKey is always current via closure */
   const addE=useCallback(()=>{
     const id=uid();
     updE(a=>[...a,{id,name:"New Expense",budgeted:0,actual:0,paid:false,category:"Essential",notes:"",linkedDebtId:null}]);
@@ -810,38 +899,37 @@ export default function App() {
   const delE=useCallback(id=>hide(id,()=>updE(a=>a.filter(r=>r.id!==id))),[hide,updE]);
 
   const setE=useCallback((id,k,v)=>{
+    // Capture monthKey in closure at call time — safe because useCallback re-creates when monthKey changes
+    const mk=monthKey;
     SS(p=>{
-      const c=p.months[monthKey]||{};
+      const c=p.months[mk]||{};
       const newExp=(c.expenses||[]).map(r=>r.id===id?{...r,[k]:v}:r);
       let newDebts=p.debts||[];
 
-      // When paid checkbox toggled AND expense has a linked debt → auto-update payment
       if(k==="paid"){
         const exp=newExp.find(r=>r.id===id);
         if(exp?.linkedDebtId){
           const amount=exp.actual||0;
           newDebts=newDebts.map(d=>{
             if(d.id!==exp.linkedDebtId) return d;
-            const cur=(d.payments||{})[monthKey]||0;
+            const cur=(d.payments||{})[mk]||0;
             if(v===true){
-              // Add amount to this month's payment
-              return{...d,payments:{...(d.payments||{}),[monthKey]:cur+amount}};
+              return{...d,payments:{...(d.payments||{}),[mk]:cur+amount}};
             } else {
-              // Remove amount from this month's payment
               const nv=Math.max(0,cur-amount);
               const np={...(d.payments||{})};
-              if(nv>0) np[monthKey]=nv; else delete np[monthKey];
+              if(nv>0) np[mk]=nv; else delete np[mk];
               return{...d,payments:np};
             }
           });
         }
       }
 
-      return{...p,months:{...p.months,[monthKey]:{...c,expenses:newExp}},debts:newDebts};
+      return{...p,months:{...p.months,[mk]:{...c,expenses:newExp}},debts:newDebts};
     });
   },[monthKey]);
 
-  /* Debts (global) */
+  /* Debts */
   const addD=useCallback(()=>{
     const id=uid();
     updD(a=>[...a,{id,name:"New Debt",totalDebt:0,dueDate:"",completed:false,notes:"",payments:{}}]);
@@ -849,13 +937,15 @@ export default function App() {
   },[updD,show]);
   const delD=useCallback(id=>hide(id,()=>updD(a=>a.filter(r=>r.id!==id))),[hide,updD]);
   const setD=useCallback((id,k,v)=>updD(a=>a.map(r=>r.id===id?{...r,[k]:v}:r)),[updD]);
-  /* Set payment for current month */
-  const setDebtPay=useCallback((id,amount)=>SS(p=>({
-    ...p,debts:(p.debts||[]).map(d=>d.id===id
-      ?{...d,payments:{...(d.payments||{}),[monthKey]:Math.max(0,amount)}}
-      :d
-    )
-  })),[monthKey]);
+  const setDebtPay=useCallback((id,amount)=>{
+    const mk=monthKey;
+    SS(p=>({
+      ...p,debts:(p.debts||[]).map(d=>d.id===id
+        ?{...d,payments:{...(d.payments||{}),[mk]:Math.max(0,amount)}}
+        :d
+      )
+    }));
+  },[monthKey]);
 
   /* Month navigation */
   const handleMonthChange=useCallback((y,m)=>{setExpSearch("");setExpCat("All");sCY(y);sCM(m);},[]);
@@ -869,7 +959,7 @@ export default function App() {
     sCY(ny);sCM(nm);
   },[curM,curY]);
 
-  /* Template save — FIX: also applies new items to current month */
+  /* Template save */
   const handleTemplateSave=useCallback(t=>{
     SS(p=>{
       const c=p.months[monthKey]||{};
@@ -886,13 +976,17 @@ export default function App() {
     });
   },[monthKey]);
 
-  /* Import backup */
+  /* FIX: import now validates before applying */
   const handleImport=useCallback(e=>{
     const f=e.target.files[0];if(!f) return;
     const r=new FileReader();
     r.onload=ev=>{
-      try{const d=JSON.parse(ev.target.result);if(d?.months){SS(migrateToV6(d));alert("Restored successfully!");}else alert("Invalid backup.");}
-      catch{alert("Could not parse file.");}
+      try{
+        const d=JSON.parse(ev.target.result);
+        if(!validateBackup(d)){alert("Invalid backup file — structure check failed.");return;}
+        SS(migrateToV6(d));
+        alert("Restored successfully!");
+      } catch{alert("Could not parse file. Make sure it's a valid JSON backup.");}
     };
     r.readAsText(f);e.target.value="";
   },[]);
@@ -909,7 +1003,6 @@ export default function App() {
   const bgtInc    = income.reduce((s,i)=>s+(i.budgeted||0),0);
   const bgtExp    = expenses.reduce((s,e)=>s+(e.budgeted||0),0);
   const paidCnt   = expenses.filter(e=>e.paid).length;
-  // FIX: cumulative savings properly accumulates across all months
   const cumSav    = useMemo(()=>cumSavings(store.months,store.debts),[store.months,store.debts]);
   const alerts    = useMemo(()=>buildAlerts(md,globalDebts,monthKey),[md,globalDebts,monthKey]);
 
@@ -1031,7 +1124,7 @@ export default function App() {
         </div>
         <div className="cr" style={{display:"flex",gap:12,flexWrap:"wrap",marginBottom:9}}>
           <MCard label="This Month Saved"  value={fmt(mthSav)}  color={mthSav>=0?"#34d399":"#f87171"} sub="Income − Expenses − Loan Payments" danger={mthSav<0}/>
-          <MCard label="Total Saved (All)" value={fmt(cumSav)}  color="#a5b4fc" sub={`Sum of all ${allKeys.length} month${allKeys.length!==1?"s":""}`} isHero={false}/>
+          <MCard label="Total Saved (All)" value={fmt(cumSav)}  color="#a5b4fc" sub={`Sum of all ${allKeys.length} month${allKeys.length!==1?"s":""}`}/>
           <MCard label="Loan Paid (Month)" value={fmt(loanPaid)} color="#818cf8"/>
           <MCard label="Outstanding Debt"  value={fmt(remDebt)} color="#fbbf24" danger={remDebt>0} sub={`${debtPct}% cleared`}/>
         </div>
@@ -1144,7 +1237,6 @@ export default function App() {
                     <td style={{...TD,textAlign:"right"}} className={`er ${row.paid?"paid":""}`}>
                       <NumInput value={row.actual} onChange={v=>setE(row.id,"actual",v)}/>
                     </td>
-                    {/* FIX: Link expense to debt — checking paid auto-updates debt payment */}
                     <td style={TD} className="hm">
                       <DebtSelect value={row.linkedDebtId} onChange={v=>setE(row.id,"linkedDebtId",v)} globalDebts={globalDebts}/>
                     </td>
@@ -1171,7 +1263,7 @@ export default function App() {
           </div>
         </Card>
 
-        {/* DEBT TABLE — global debts, per-month payment column */}
+        {/* DEBT TABLE */}
         <Card style={{background:"rgba(99,102,241,0.035)",border:"1px solid rgba(99,102,241,0.1)"}} className="su">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:16,flexWrap:"wrap",gap:8}}>
             <div>
@@ -1377,5 +1469,13 @@ export default function App() {
           onClose={()=>sm(null)}/>
       )}
     </div>
+  );
+}
+
+export default function WrappedApp() {
+  return (
+    <ErrorBoundary>
+      <App/>
+    </ErrorBoundary>
   );
 }
